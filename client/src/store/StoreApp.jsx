@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, createContext, useContext, useRef } from "react";
-import { Search, ShoppingCart, Sun, Moon, Menu, X, ChevronLeft, ChevronRight, Plus, Minus, Trash2, Check, AlertTriangle, Star, ArrowLeft, ShieldCheck, Truck, RotateCcw, Upload, Landmark, Copy, ImageOff, Lock } from "lucide-react";
+import { Search, ShoppingCart, Sun, Moon, Menu, X, ChevronLeft, ChevronRight, Plus, Minus, Trash2, Check, AlertTriangle, Star, ArrowLeft, ShieldCheck, Truck, Upload, Landmark, Copy, ImageOff, Lock } from "lucide-react";
 
 /* =========================================================================
    Point this at your deployed backend. See velorra-hub-backend/README.md.
@@ -31,6 +31,16 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Request failed.");
+  return res.json();
+}
+
+async function apiPut(path, body) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
@@ -120,7 +130,7 @@ function useDocumentSEO({ view, selectedProduct, activeCategory, categories, que
         offers: {
           "@type": "Offer",
           url: canonicalUrl,
-          priceCurrency: "USD",
+          priceCurrency: "NGN",
           price: selectedProduct.price,
           availability: selectedProduct.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
         },
@@ -161,6 +171,17 @@ function useDocumentSEO({ view, selectedProduct, activeCategory, categories, que
 const StoreCtx = createContext(null);
 const useStore = () => useContext(StoreCtx);
 
+// A stable per-browser ID, created once and reused, so a customer's cart can
+// be saved to the server and restored automatically on their next visit.
+function getUserId() {
+  let id = localStorage.getItem("velorra_user_id");
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : `user-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    localStorage.setItem("velorra_user_id", id);
+  }
+  return id;
+}
+
 function StoreProvider({ children }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -169,27 +190,37 @@ function StoreProvider({ children }) {
   const [loadError, setLoadError] = useState(null);
   const [cart, setCart] = useState([]);
   const [theme, setTheme] = useState("light");
+  const userId = useMemo(() => getUserId(), []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [p, c, pa] = await Promise.all([
+      const [p, c, pa, savedCart] = await Promise.all([
         apiGet("/products"),
         apiGet("/categories"),
         apiGet("/payment-account"),
+        apiGet(`/cart/${userId}`).catch(() => ({ items: [] })),
       ]);
       setProducts(p);
       setCategories(c);
       setPaymentAccount(pa);
+      setCart(savedCart.items || []);
     } catch (e) {
       setLoadError(e.message || "Couldn't reach the store server.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Save the cart to the server any time it changes, so it survives reloads
+  // until the customer removes an item themselves.
+  useEffect(() => {
+    if (loading) return; // don't overwrite the saved cart with an empty one before it's loaded
+    apiPut(`/cart/${userId}`, { items: cart }).catch(() => {});
+  }, [cart, userId, loading]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -232,7 +263,7 @@ function StoreProvider({ children }) {
    Shared bits
    ========================================================================= */
 
-function money(n) { return `$${Number(n).toFixed(2)}`; }
+function money(n) { return `₦${Number(n).toLocaleString("en-NG")}`; }
 
 /**
  * Image with a lightweight blur-up placeholder and graceful fallback, tuned for
@@ -322,7 +353,7 @@ function Header({ query, setQuery, onCartClick, onMenuClick, cartCount, onLogoCl
   );
 }
 
-function CategoryNav({ categories, activeCategory, setActiveCategory, onAdminClick }) {
+function CategoryNav({ categories, activeCategory, setActiveCategory, onAdminClick, onCartClick, cartCount }) {
   return (
     <nav className="category-nav" aria-label="Categories">
       <div className="category-nav-row">
@@ -330,6 +361,9 @@ function CategoryNav({ categories, activeCategory, setActiveCategory, onAdminCli
         {categories.map((c) => (
           <button key={c.id} className={`cat-pill ${activeCategory === c.id ? "active" : ""}`} onClick={() => setActiveCategory(c.id)}>{c.name}</button>
         ))}
+        <button className="cat-pill nav-cart-pill" onClick={onCartClick} aria-label="Open cart">
+          <ShoppingCart size={12} /> Cart{cartCount > 0 ? ` (${cartCount})` : ""}
+        </button>
         <button className="cat-pill admin-entry-pill" onClick={onAdminClick} aria-label="Admin login">
           <Lock size={12} /> Admin
         </button>
@@ -338,7 +372,7 @@ function CategoryNav({ categories, activeCategory, setActiveCategory, onAdminCli
   );
 }
 
-function MobileDrawer({ open, onClose, categories, activeCategory, setActiveCategory, onAdminClick }) {
+function MobileDrawer({ open, onClose, categories, activeCategory, setActiveCategory, onAdminClick, onCartClick, cartCount }) {
   if (!open) return null;
   return (
     <div className="drawer-overlay" onClick={onClose}>
@@ -352,6 +386,9 @@ function MobileDrawer({ open, onClose, categories, activeCategory, setActiveCate
           {categories.map((c) => (
             <button key={c.id} className={`drawer-item ${activeCategory === c.id ? "active" : ""}`} onClick={() => { setActiveCategory(c.id); onClose(); }}>{c.name}</button>
           ))}
+          <button className="drawer-item" onClick={() => { onClose(); onCartClick(); }}>
+            <ShoppingCart size={15} style={{ marginRight: 8 }} /> Cart{cartCount > 0 ? ` (${cartCount})` : ""}
+          </button>
         </div>
         <div className="drawer-foot">
           <button className="drawer-admin-link" onClick={() => { onClose(); onAdminClick(); }}>
@@ -360,6 +397,7 @@ function MobileDrawer({ open, onClose, categories, activeCategory, setActiveCate
         </div>
       </div>
     </div>
+
   );
 }
 
@@ -523,7 +561,6 @@ function ProductDetail({ product, onBack, onAddToCart, categories }) {
 
           <div className="pdp-trust">
             <div><Truck size={16} /> Ships after payment is confirmed</div>
-            <div><RotateCcw size={16} /> 30-day easy returns</div>
             <div><ShieldCheck size={16} /> Your details stay private</div>
           </div>
         </div>
@@ -536,7 +573,7 @@ function ProductDetail({ product, onBack, onAddToCart, categories }) {
    Cart Drawer
    ========================================================================= */
 
-function CartDrawer({ open, onClose, cart, updateCartQty, removeFromCart, onCheckout }) {
+function CartDrawer({ open, onClose, cart, updateCartQty, removeFromCart, onCheckout, onCheckoutItem }) {
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   return (
     <div className={`cart-overlay ${open ? "open" : ""}`} onClick={onClose} aria-hidden={!open}>
@@ -556,20 +593,21 @@ function CartDrawer({ open, onClose, cart, updateCartQty, removeFromCart, onChec
                   <div className="cart-item-info">
                     <span className="cart-item-name">{item.name}</span>
                     <span className="cart-item-variant">{[item.color, item.size].filter(Boolean).join(" / ")}</span>
-                    <span className="price">{money(item.price)}</span>
+                    <span className="price">{money(item.price * item.qty)}</span>
                     <div className="qty-stepper small">
                       <button onClick={() => updateCartQty(item.key, item.qty - 1)} aria-label="Decrease quantity"><Minus size={12} /></button>
                       <span>{item.qty}</span>
                       <button onClick={() => updateCartQty(item.key, item.qty + 1)} aria-label="Increase quantity"><Plus size={12} /></button>
                     </div>
+                    <button className="btn btn-ghost small cart-item-checkout" onClick={() => onCheckoutItem(item)}>Checkout this item</button>
                   </div>
                   <button className="icon-btn cart-remove" onClick={() => removeFromCart(item.key)} aria-label="Remove item"><Trash2 size={16} /></button>
                 </div>
               ))}
             </div>
             <div className="cart-foot">
-              <div className="cart-subtotal"><span>Subtotal</span><span className="price price-lg">{money(subtotal)}</span></div>
-              <button className="btn btn-primary btn-full" onClick={onCheckout}>Proceed to checkout</button>
+              <div className="cart-subtotal"><span>Total ({cart.reduce((s, c) => s + c.qty, 0)} items)</span><span className="price price-lg">{money(subtotal)}</span></div>
+              <button className="btn btn-primary btn-full" onClick={onCheckout}>Checkout all items</button>
             </div>
           </>
         )}
@@ -701,12 +739,19 @@ function Checkout({ cart, paymentAccount, onBack, onOrderPlaced, placeOrder }) {
               <div className="pay-account-row"><div><span className="pay-label">Account name</span><span className="pay-value">{paymentAccount.accountName}</span></div></div>
               <div className="pay-account-row"><div><span className="pay-label">Bank</span><span className="pay-value">{paymentAccount.bank}</span></div></div>
               <p className="pay-note"><Landmark size={13} /> Transfer the order total below to this account, then fill in the amount you paid.</p>
+              {(paymentAccount.contactPhone || paymentAccount.contactWhatsapp) && (
+                <p className="pay-note">
+                  Questions? Contact us
+                  {paymentAccount.contactPhone ? ` by phone: ${paymentAccount.contactPhone}` : ""}
+                  {paymentAccount.contactWhatsapp ? `${paymentAccount.contactPhone ? " or" : ""} WhatsApp: ${paymentAccount.contactWhatsapp}` : ""}
+                </p>
+              )}
             </div>
           ) : (
             <p className="pay-note">Payment details are unavailable right now — please try again shortly.</p>
           )}
 
-          <label>Amount paid (USD)
+          <label>Amount paid (NGN)
             <input type="number" min="0" step="0.01" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder={subtotal.toFixed(2)} required />
           </label>
 
@@ -766,7 +811,7 @@ function Footer() {
           <p className="footer-tag">Accessories, clothing, electronics, appliances and devices — sourced, shipped, sorted.</p>
         </div>
         <div><h3>Shop</h3><p>Accessories</p><p>Clothing</p><p>Electronics</p><p>Appliances</p><p>Devices</p></div>
-        <div><h3>Support</h3><p>Track an order</p><p>Returns</p><p>Payment help</p><p>Contact us</p></div>
+        <div><h3>Support</h3><p>Track an order</p><p>Payment help</p><p>Contact us</p></div>
         <div><h3>Company</h3><p>About Velorra Hub</p><p>Careers</p><p>Terms</p><p>Privacy</p></div>
       </div>
       <div className="footer-bottom">© {new Date().getFullYear()} Velorra Hub. All rights reserved.</div>
@@ -787,6 +832,7 @@ function StoreApp({ onGoAdmin }) {
   const [cartOpen, setCartOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [view, setView] = useState("shop"); // shop | checkout | confirmed
+  const [checkoutItem, setCheckoutItem] = useState(null); // single item checked out alone, or null for the whole cart
   const [lastOrder, setLastOrder] = useState(null);
   const [lastOrderForm, setLastOrderForm] = useState(null);
 
@@ -833,16 +879,16 @@ function StoreApp({ onGoAdmin }) {
         onCartClick={() => setCartOpen(true)} onMenuClick={() => setDrawerOpen(true)} cartCount={cartCount}
         onLogoClick={() => { setSelectedProduct(null); setActiveCategory(null); setQuery(""); setView("shop"); }}
       />
-      <CategoryNav categories={categories} activeCategory={activeCategory} setActiveCategory={(c) => { setActiveCategory(c); setSelectedProduct(null); setView("shop"); }} onAdminClick={onGoAdmin} />
-      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} categories={categories} activeCategory={activeCategory} setActiveCategory={(c) => { setActiveCategory(c); setSelectedProduct(null); setView("shop"); }} onAdminClick={onGoAdmin} />
+      <CategoryNav categories={categories} activeCategory={activeCategory} setActiveCategory={(c) => { setActiveCategory(c); setSelectedProduct(null); setView("shop"); }} onAdminClick={onGoAdmin} onCartClick={() => setCartOpen(true)} cartCount={cartCount} />
+      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} categories={categories} activeCategory={activeCategory} setActiveCategory={(c) => { setActiveCategory(c); setSelectedProduct(null); setView("shop"); }} onAdminClick={onGoAdmin} onCartClick={() => setCartOpen(true)} cartCount={cartCount} />
 
       <main className="site-main">
         {view === "confirmed" && lastOrder ? (
           <OrderConfirmation order={lastOrder} form={lastOrderForm} onDone={() => { setView("shop"); setLastOrder(null); }} />
         ) : view === "checkout" ? (
           <Checkout
-            cart={cart} paymentAccount={paymentAccount} onBack={() => setView("shop")} placeOrder={placeOrder}
-            onOrderPlaced={(order, form) => { setLastOrder(order); setLastOrderForm(form); setView("confirmed"); }}
+            cart={checkoutItem ? [checkoutItem] : cart} paymentAccount={paymentAccount} onBack={() => setView("shop")} placeOrder={placeOrder}
+            onOrderPlaced={(order, form) => { setLastOrder(order); setLastOrderForm(form); setCheckoutItem(null); setView("confirmed"); }}
           />
         ) : selectedProduct ? (
           <ProductDetail product={selectedProduct} onBack={() => setSelectedProduct(null)} onAddToCart={addToCart} categories={categories} />
@@ -858,7 +904,8 @@ function StoreApp({ onGoAdmin }) {
 
       <CartDrawer
         open={cartOpen} onClose={() => setCartOpen(false)} cart={cart} updateCartQty={updateCartQty} removeFromCart={removeFromCart}
-        onCheckout={() => { setCartOpen(false); setSelectedProduct(null); setView("checkout"); }}
+        onCheckout={() => { setCartOpen(false); setSelectedProduct(null); setCheckoutItem(null); setView("checkout"); }}
+        onCheckoutItem={(item) => { setCartOpen(false); setSelectedProduct(null); setCheckoutItem(item); setView("checkout"); }}
       />
     </div>
   );
@@ -898,7 +945,7 @@ function GlobalStyles() {
         color-scheme: dark;
       }
       * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; }
+      html, body { margin: 0; padding: 0; max-width: 100%; overflow-x: hidden; }
       body { background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; transition: background 0.2s ease, color 0.2s ease; }
       button { font-family: inherit; cursor: pointer; }
       input, select, textarea { font-family: inherit; }
@@ -943,7 +990,7 @@ function GlobalStyles() {
       .header-row { max-width: 1320px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 14px; }
       .logo { background: none; border: none; padding: 4px 2px; }
       .logo-mark { font-weight: 800; font-size: 22px; letter-spacing: -0.03em; color: var(--ink); }
-      .search-wrap { flex: 1; position: relative; display: flex; align-items: center; background: var(--bg); border: 1.5px solid var(--border); border-radius: 999px; padding: 0 14px; max-width: 640px; transition: border-color 0.15s ease; }
+      .search-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; background: var(--bg); border: 1.5px solid var(--border); border-radius: 999px; padding: 0 14px; max-width: 640px; transition: border-color 0.15s ease; }
       .search-wrap:focus-within { border-color: var(--accent); }
       .search-icon { color: var(--ink-soft); flex-shrink: 0; }
       .search-input { flex: 1; border: none; background: transparent; outline: none; padding: 10px 10px; font-size: 14.5px; color: var(--ink); min-width: 0; }
@@ -963,7 +1010,8 @@ function GlobalStyles() {
       .cat-pill:hover { border-color: var(--ink-soft); color: var(--ink); }
       .cat-pill.active { background: var(--ink); border-color: var(--ink); color: var(--bg); }
       [data-theme="dark"] .cat-pill.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-      .admin-entry-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ink-soft); opacity: 0.75; }
+      .nav-cart-pill { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+      .admin-entry-pill { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-soft); opacity: 0.75; }
       .admin-entry-pill:hover { opacity: 1; }
 
       .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 60; }
@@ -995,22 +1043,21 @@ function GlobalStyles() {
 
       .section-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 16px; }
 
-      /* --- Compact horizontal product cards: at least 2.5 fit per row --- */
+      /* --- Jumia-style vertical product cards: image on top, narrow columns --- */
       .product-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 12px;
+        gap: 10px;
       }
       @media (max-width: 480px) {
-        .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(60px, 0.5fr); grid-auto-flow: column dense; }
+        .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
       .product-card {
-        background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md);
-        overflow: hidden; display: flex; flex-direction: row; transition: box-shadow 0.2s ease, transform 0.2s ease;
-        height: 108px;
+        background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px;
+        overflow: hidden; display: flex; flex-direction: column; transition: box-shadow 0.2s ease, transform 0.2s ease;
       }
       .product-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
-      .product-media { position: relative; display: block; border: none; padding: 0; background: var(--bg); width: 108px; height: 108px; flex-shrink: 0; overflow: hidden; }
+      .product-media { position: relative; display: block; border: none; padding: 0; background: var(--bg); width: 100%; aspect-ratio: 1 / 1; overflow: hidden; }
       .product-media img, .product-media-img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.35s ease; }
       .product-media:hover img, .product-media:hover .lazy-img { transform: scale(1.05); }
       .stock-overlay { position: absolute; inset: 0; background: rgba(23,23,26,0.55); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 10.5px; letter-spacing: 0.02em; text-align: center; padding: 4px; }
@@ -1020,20 +1067,18 @@ function GlobalStyles() {
       .badge-new { background: var(--ink); color: var(--bg); }
       .badge-ok { background: var(--ok-soft); color: var(--ok); }
       .badge-warn { background: var(--warn-soft); color: var(--warn); }
-      .product-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; justify-content: center; }
-      .product-name { text-align: left; background: none; border: none; padding: 0; font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .product-body { padding: 8px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      .product-name { text-align: left; background: none; border: none; padding: 0; font-size: 12px; font-weight: 500; color: var(--ink); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; }
       .product-name:hover { color: var(--accent); }
       .stars { display: inline-flex; align-items: center; gap: 2px; }
       .stars-count { color: var(--ink-soft); font-size: 10.5px; margin-left: 2px; }
       .product-price-row { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
-      .price { font-weight: 800; font-size: 13.5px; }
+      .price { font-weight: 700; font-size: 13px; }
       .price-lg { font-size: 22px; }
       .price-compare { text-decoration: line-through; color: var(--ink-soft); font-size: 11px; }
 
       @media (max-width: 640px) {
-        .product-card { height: 92px; }
-        .product-media { width: 92px; height: 92px; }
-        .product-body { padding: 6px 8px; }
+        .product-body { padding: 6px; }
         .product-name { font-size: 11.5px; }
       }
 
@@ -1083,6 +1128,7 @@ function GlobalStyles() {
       .cart-item-name { font-size: 13.5px; font-weight: 600; }
       .cart-item-variant { font-size: 12px; color: var(--ink-soft); }
       .cart-remove { flex-shrink: 0; align-self: flex-start; color: var(--ink-soft); }
+      .cart-item-checkout { margin-top: 4px; align-self: flex-start; padding: 5px 10px; font-size: 11.5px; }
       .cart-remove:hover { color: var(--danger); }
       .cart-foot { padding: 16px 20px 20px; border-top: 1px solid var(--border); }
       .cart-subtotal { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-weight: 600; }
