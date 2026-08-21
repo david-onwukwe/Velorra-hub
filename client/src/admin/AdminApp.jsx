@@ -69,7 +69,7 @@ function AdminProvider({ children }) {
    Shared bits
    ========================================================================= */
 
-function money(n) { return `$${Number(n).toFixed(2)}`; }
+function money(n) { return `₦${Number(n).toLocaleString("en-NG")}`; }
 
 function Badge({ children, tone = "default" }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
@@ -128,22 +128,22 @@ function AdminShell({ children, section, setSection, onLogout, onExit, pendingCo
     { id: "settings", label: "Account", icon: Settings },
   ];
   return (
-    <div className="admin-root">
-      <aside className="admin-sidebar">
-        <div className="admin-sidebar-top"><span className="logo-mark">Velorra Hub</span><span className="admin-tag">Admin</span></div>
-        <nav>
-          {sections.map((s) => (
-            <button key={s.id} className={`admin-nav-item ${section === s.id ? "active" : ""}`} onClick={() => setSection(s.id)}>
-              <s.icon size={17} /> {s.label}
-              {!!s.count && <span className="nav-count">{s.count}</span>}
-            </button>
-          ))}
-        </nav>
-        <div className="admin-sidebar-bottom">
-          <button className="admin-nav-item" onClick={onExit}><ArrowLeft size={17} /> Back to store</button>
-          <button className="admin-nav-item danger" onClick={onLogout}><LogOut size={17} /> Log out</button>
+    <div className="admin-root-topnav">
+      <header className="admin-topnav">
+        <div className="admin-topnav-row">
+          <span className="logo-mark">Velorra Hub<span className="admin-tag"> Admin</span></span>
+          <nav className="admin-topnav-links">
+            {sections.map((s) => (
+              <button key={s.id} className={`admin-nav-item ${section === s.id ? "active" : ""}`} onClick={() => setSection(s.id)}>
+                <s.icon size={16} /> {s.label}
+                {!!s.count && <span className="nav-count">{s.count}</span>}
+              </button>
+            ))}
+            <button className="admin-nav-item" onClick={onExit}><ArrowLeft size={16} /> Back to store</button>
+            <button className="admin-nav-item danger" onClick={onLogout}><LogOut size={16} /> Log out</button>
+          </nav>
         </div>
-      </aside>
+      </header>
       <main className="admin-main">{children}</main>
     </div>
   );
@@ -268,10 +268,56 @@ function ProductForm({ product, categories, onSave, onCancel, onDelete }) {
   const [sizeInput, setSizeInput] = useState("");
   const [imageInput, setImageInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [error, setError] = useState(null);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const addTag = (tag) => (v) => set("tags", v ? Array.from(new Set([...(form.tags || []), tag])) : (form.tags || []).filter((t) => t !== tag));
+
+  // Converts a photo picked from the phone's gallery/camera into a compressed
+  // data URL so it can be stored and displayed like any other image — no
+  // separate image hosting service needed. Resizing/compressing here (rather
+  // than storing the original multi-megabyte phone photo) keeps uploads
+  // reliable on slow connections and keeps the storefront fast for shoppers.
+  const compressImage = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploadingImage(true);
+    Promise.allSettled(files.map(compressImage)).then((results) => {
+      const newImages = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+      if (newImages.length) {
+        setForm((f) => ({ ...f, images: [...(f.images || []), ...newImages] }));
+      }
+      setUploadingImage(false);
+    });
+    e.target.value = ""; // allow choosing the same file again later
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -334,11 +380,28 @@ function ProductForm({ product, categories, onSave, onCancel, onDelete }) {
         </div>
 
         <div className="span-2">
-          <span className="option-label">Image URLs</span>
+          <span className="option-label">Product photos</span>
+
+          <div className="file-drop">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFileUpload}
+              id="product-image-upload"
+            />
+            <label htmlFor="product-image-upload" className="file-drop-label">
+              <Upload size={16} /> {uploadingImage ? "Adding photo…" : "Upload photos from your phone (gallery or camera)"}
+            </label>
+          </div>
+
+          <div className="option-divider"><span>or add an image already online</span></div>
+
           <div className="tag-input-row">
             <input value={imageInput} onChange={(e) => setImageInput(e.target.value)} placeholder="https://…" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (imageInput.trim()) { set("images", [...(form.images || []), imageInput.trim()]); setImageInput(""); } } }} />
-            <button type="button" className="btn btn-ghost" onClick={() => { if (imageInput.trim()) { set("images", [...(form.images || []), imageInput.trim()]); setImageInput(""); } }}><Upload size={13} /> Add</button>
+            <button type="button" className="btn btn-ghost" onClick={() => { if (imageInput.trim()) { set("images", [...(form.images || []), imageInput.trim()]); setImageInput(""); } }}>Add link</button>
           </div>
+
           <div className="image-thumb-row">
             {(form.images || []).length === 0 && <div className="image-thumb-empty"><ImageIcon size={18} /></div>}
             {(form.images || []).map((im, i) => <div className="image-thumb" key={i}><img src={im} alt="" /><button type="button" onClick={() => set("images", form.images.filter((_, idx) => idx !== i))}><X size={12} /></button></div>)}
@@ -477,7 +540,7 @@ function AdminCategories({ categories, products, loading, onCreate, onDelete }) 
    ========================================================================= */
 
 function AdminPaymentAccount({ paymentAccount, loading, onSave }) {
-  const [form, setForm] = useState({ accountNumber: "", accountName: "", bank: "" });
+  const [form, setForm] = useState({ accountNumber: "", accountName: "", bank: "", contactPhone: "", contactWhatsapp: "" });
   const [msg, setMsg] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -489,7 +552,7 @@ function AdminPaymentAccount({ paymentAccount, loading, onSave }) {
     setMsg(null);
     try {
       await onSave(form);
-      setMsg({ type: "ok", text: "Payment details updated. Customers will see this on checkout." });
+      setMsg({ type: "ok", text: "Details updated. Customers will see this on checkout." });
     } catch (e) {
       setMsg({ type: "error", text: e.message });
     } finally {
@@ -500,7 +563,7 @@ function AdminPaymentAccount({ paymentAccount, loading, onSave }) {
   return (
     <div>
       <div className="admin-page-head"><h1>Payment account</h1></div>
-      <p className="admin-note" style={{ marginBottom: 18 }}>These are the bank details shown to customers at checkout so they know where to send payment.</p>
+      <p className="admin-note" style={{ marginBottom: 18 }}>These are the bank details and contact numbers shown to customers at checkout.</p>
       <form className="admin-panel-card" onSubmit={submit} style={{ maxWidth: 460 }}>
         {msg && <div className={msg.type === "error" ? "admin-error" : "admin-success"} style={{ marginBottom: 14 }}>{msg.type === "error" ? <AlertTriangle size={15} /> : <Check size={15} />} {msg.text}</div>}
         {loading ? <p className="admin-note">Loading…</p> : (
@@ -508,7 +571,9 @@ function AdminPaymentAccount({ paymentAccount, loading, onSave }) {
             <label>Account number<input value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} placeholder="0123456789" /></label>
             <label>Account name<input value={form.accountName} onChange={(e) => setForm({ ...form, accountName: e.target.value })} placeholder="Velorra Hub Trading Ltd" /></label>
             <label>Bank<input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} placeholder="First Bank of Nigeria" /></label>
-            <button className="btn btn-primary btn-full" type="submit" disabled={saving}><Save size={14} /> {saving ? "Saving…" : "Save payment details"}</button>
+            <label>Contact phone number <span className="label-hint">(for customers to reach you)</span><input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder="+234…" /></label>
+            <label>Contact WhatsApp number<input value={form.contactWhatsapp} onChange={(e) => setForm({ ...form, contactWhatsapp: e.target.value })} placeholder="+234…" /></label>
+            <button className="btn btn-primary btn-full" type="submit" disabled={saving}><Save size={14} /> {saving ? "Saving…" : "Save details"}</button>
           </>
         )}
       </form>
@@ -671,7 +736,18 @@ function GlobalStyles() {
       button { font-family: inherit; cursor: pointer; }
       input, select, textarea { font-family: inherit; }
       img { max-width: 100%; display: block; }
-      .admin-root { min-height: 100vh; display: flex; }
+      .admin-root-topnav { min-height: 100vh; }
+      .admin-topnav { background: var(--bg-elevated); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
+      .admin-topnav-row { display: flex; align-items: center; gap: 20px; padding: 12px 24px; flex-wrap: wrap; }
+      .admin-tag { font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; }
+      .admin-topnav-links { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+      .admin-nav-item { display: flex; align-items: center; gap: 6px; text-align: left; padding: 8px 12px; border-radius: var(--radius-sm); background: none; border: none; color: var(--ink-soft); font-size: 13px; font-weight: 600; white-space: nowrap; }
+      .admin-nav-item:hover { background: var(--bg); color: var(--ink); }
+      .admin-nav-item.active { background: var(--accent-soft); color: var(--accent); }
+      .admin-nav-item.danger:hover { background: var(--danger-soft); color: var(--danger); }
+      .nav-count { background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; border-radius: 999px; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
+      .admin-main { padding: 30px 36px; max-width: 1200px; }
+      @media (max-width: 780px) { .admin-main { padding: 20px; } }
       .logo-mark { font-weight: 800; font-size: 20px; letter-spacing: -0.03em; }
 
       .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: var(--radius-sm); border: 1px solid transparent; padding: 10px 16px; font-size: 14px; font-weight: 600; transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s ease; white-space: nowrap; }
@@ -695,7 +771,7 @@ function GlobalStyles() {
       .badge-warn { background: var(--warn-soft); color: var(--warn); }
 
       /* Login */
-      .admin-login-root { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+      .admin-login-root { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; gap: 16px; }
       .admin-login-card { width: 100%; max-width: 380px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 32px 28px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--shadow-md); }
       .admin-login-card h1 { font-size: 20px; margin: 4px 0 0; }
       .admin-login-sub { color: var(--ink-soft); font-size: 13.5px; margin: 0 0 6px; }
@@ -712,17 +788,7 @@ function GlobalStyles() {
       .admin-success { display: flex; align-items: center; gap: 7px; background: var(--ok-soft); color: var(--ok); padding: 9px 12px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; }
 
       /* Shell */
-      .admin-sidebar { width: 230px; flex-shrink: 0; background: var(--bg-elevated); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 14px; position: sticky; top: 0; height: 100vh; }
-      .admin-sidebar-top { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px 22px; }
-      .admin-tag { font-size: 11px; font-weight: 700; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; }
-      .admin-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border-radius: var(--radius-sm); background: none; border: none; color: var(--ink-soft); font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
-      .admin-nav-item:hover { background: var(--bg); color: var(--ink); }
-      .admin-nav-item.active { background: var(--accent-soft); color: var(--accent); }
-      .admin-nav-item.danger:hover { background: var(--danger-soft); color: var(--danger); }
-      .nav-count { margin-left: auto; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; border-radius: 999px; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; padding: 0 5px; }
-      .admin-sidebar-bottom { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
-      .admin-main { flex: 1; padding: 30px 36px; max-width: 1200px; }
-      @media (max-width: 780px) { .admin-root { flex-direction: column; } .admin-sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; align-items: center; } .admin-sidebar nav { display: flex; flex-wrap: wrap; flex: 1; } .admin-sidebar-bottom { margin: 0; padding: 0; border: none; } .admin-main { padding: 20px; } }
+
 
       .admin-page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
       .admin-page-head h1 { font-size: 22px; margin: 0; }
@@ -769,6 +835,12 @@ function GlobalStyles() {
       .image-thumb img { width: 100%; height: 100%; object-fit: cover; }
       .image-thumb button { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.6); border: none; color: #fff; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
       .image-thumb-empty { width: 64px; height: 64px; border-radius: var(--radius-sm); border: 1.5px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--ink-soft); }
+      .file-drop { margin-bottom: 10px; }
+      .file-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+      .file-drop-label { display: flex; align-items: center; gap: 8px; padding: 12px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--ink-soft); cursor: pointer; font-weight: 600; }
+      .file-drop-label:hover { border-color: var(--accent); color: var(--ink); }
+      .option-divider { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 11.5px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.03em; }
+      .option-divider::before, .option-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
       .admin-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
       .inline-form { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 20px; }
 
