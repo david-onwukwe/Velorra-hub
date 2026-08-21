@@ -64,11 +64,19 @@ CREATE TABLE IF NOT EXISTS order_items (
   quantity INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS carts (
+  user_id TEXT PRIMARY KEY,
+  items TEXT NOT NULL DEFAULT '[]',   -- JSON array of cart line items
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS payment_account (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   account_number TEXT NOT NULL DEFAULT '',
   account_name TEXT NOT NULL DEFAULT '',
-  bank TEXT NOT NULL DEFAULT ''
+  bank TEXT NOT NULL DEFAULT '',
+  contact_phone TEXT NOT NULL DEFAULT '',
+  contact_whatsapp TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS admin_users (
@@ -85,12 +93,22 @@ if (!orderColumns.includes("whatsapp")) {
   db.exec("ALTER TABLE orders ADD COLUMN whatsapp TEXT");
 }
 
+// Migration: add contact_phone/contact_whatsapp columns if missing (for
+// databases created before these fields were added)
+const paymentColumns = db.prepare("PRAGMA table_info(payment_account)").all().map((c) => c.name);
+if (!paymentColumns.includes("contact_phone")) {
+  db.exec("ALTER TABLE payment_account ADD COLUMN contact_phone TEXT NOT NULL DEFAULT ''");
+}
+if (!paymentColumns.includes("contact_whatsapp")) {
+  db.exec("ALTER TABLE payment_account ADD COLUMN contact_whatsapp TEXT NOT NULL DEFAULT ''");
+}
+
 // Seed payment account row if missing — starts blank, fill in from the admin panel
 const paymentRow = db.prepare("SELECT * FROM payment_account WHERE id = 1").get();
 if (!paymentRow) {
   db.prepare(
-    "INSERT INTO payment_account (id, account_number, account_name, bank) VALUES (1, ?, ?, ?)"
-  ).run("", "", "");
+    "INSERT INTO payment_account (id, account_number, account_name, bank, contact_phone, contact_whatsapp) VALUES (1, ?, ?, ?, ?, ?)"
+  ).run("", "", "", "", "");
 }
 
 // Seed admin user if missing
