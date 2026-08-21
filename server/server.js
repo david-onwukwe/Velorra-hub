@@ -93,6 +93,25 @@ function rowToOrder(row, items) {
 }
 
 /* -------------------------------------------------------------------------
+   Public: cart persistence — saved per browser via a unique visitor ID, so a
+   customer's cart survives page reloads until they delete an item themselves.
+   ------------------------------------------------------------------------- */
+
+app.get("/api/cart/:userId", (req, res) => {
+  const row = db.prepare("SELECT items FROM carts WHERE user_id = ?").get(req.params.userId);
+  res.json({ items: row ? JSON.parse(row.items) : [] });
+});
+
+app.put("/api/cart/:userId", (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  db.prepare(`
+    INSERT INTO carts (user_id, items, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at
+  `).run(req.params.userId, JSON.stringify(items), Date.now());
+  res.json({ ok: true });
+});
+
+/* -------------------------------------------------------------------------
    Public: categories
    ------------------------------------------------------------------------- */
 
@@ -129,6 +148,8 @@ app.get("/api/payment-account", (req, res) => {
     accountNumber: row.account_number,
     accountName: row.account_name,
     bank: row.bank,
+    contactPhone: row.contact_phone,
+    contactWhatsapp: row.contact_whatsapp,
   });
 });
 
@@ -235,10 +256,10 @@ app.put("/api/admin/account", requireAdmin, (req, res) => {
    ------------------------------------------------------------------------- */
 
 app.put("/api/admin/payment-account", requireAdmin, (req, res) => {
-  const { accountNumber, accountName, bank } = req.body || {};
-  db.prepare("UPDATE payment_account SET account_number = ?, account_name = ?, bank = ? WHERE id = 1")
-    .run(accountNumber || "", accountName || "", bank || "");
-  res.json({ accountNumber, accountName, bank });
+  const { accountNumber, accountName, bank, contactPhone, contactWhatsapp } = req.body || {};
+  db.prepare("UPDATE payment_account SET account_number = ?, account_name = ?, bank = ?, contact_phone = ?, contact_whatsapp = ? WHERE id = 1")
+    .run(accountNumber || "", accountName || "", bank || "", contactPhone || "", contactWhatsapp || "");
+  res.json({ accountNumber, accountName, bank, contactPhone, contactWhatsapp });
 });
 
 /* -------------------------------------------------------------------------
