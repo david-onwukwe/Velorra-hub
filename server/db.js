@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS products (
   featured INTEGER NOT NULL DEFAULT 0,
   rating REAL NOT NULL DEFAULT 0,
   reviews INTEGER NOT NULL DEFAULT 0,
+  shipping_fee REAL NOT NULL DEFAULT 0,
+  free_shipping INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 
@@ -101,6 +103,16 @@ if (!paymentColumns.includes("contact_phone")) {
 }
 if (!paymentColumns.includes("contact_whatsapp")) {
   db.exec("ALTER TABLE payment_account ADD COLUMN contact_whatsapp TEXT NOT NULL DEFAULT ''");
+}
+
+// Migration: add shipping_fee/free_shipping columns if missing (for databases
+// created before these fields were added)
+const productColumns = db.prepare("PRAGMA table_info(products)").all().map((c) => c.name);
+if (!productColumns.includes("shipping_fee")) {
+  db.exec("ALTER TABLE products ADD COLUMN shipping_fee REAL NOT NULL DEFAULT 0");
+}
+if (!productColumns.includes("free_shipping")) {
+  db.exec("ALTER TABLE products ADD COLUMN free_shipping INTEGER NOT NULL DEFAULT 0");
 }
 
 // Seed payment account row if missing — starts blank, fill in from the admin panel
