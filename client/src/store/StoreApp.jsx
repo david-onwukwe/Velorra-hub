@@ -234,7 +234,7 @@ function StoreProvider({ children }) {
       if (existing) {
         return prev.map((c) => c.key === key ? { ...c, qty: Math.min(c.qty + qty, product.stock || 99) } : c);
       }
-      return [...prev, { key, productId: product.id, name: product.name, price: product.price, image: product.images[0], color, size, qty, stock: product.stock }];
+      return [...prev, { key, productId: product.id, name: product.name, price: product.price, image: product.images[0], color, size, qty, stock: product.stock, shippingFee: product.shippingFee || 0, freeShipping: !!product.freeShipping }];
     });
   }, []);
 
@@ -264,6 +264,14 @@ function StoreProvider({ children }) {
    ========================================================================= */
 
 function money(n) { return `₦${Number(n).toLocaleString("en-NG")}`; }
+
+// Shipping fee stays flat per item for normal quantities, but scales up once
+// someone orders in bulk (5 or more of the same item) — a single shipment
+// no longer covers that fairly, so the fee multiplies by quantity instead.
+function lineShippingFee(item) {
+  if (item.freeShipping || !item.shippingFee) return 0;
+  return item.qty >= 5 ? item.shippingFee * item.qty : item.shippingFee;
+}
 
 /**
  * Image with a lightweight blur-up placeholder and graceful fallback, tuned for
@@ -334,7 +342,7 @@ function Header({ query, setQuery, onCartClick, onMenuClick, cartCount, onLogoCl
       <div className="header-row">
         <button className="icon-btn only-mobile" onClick={onMenuClick} aria-label="Open categories"><Menu size={22} /></button>
         <button className="logo" onClick={onLogoClick} aria-label="Velorra Hub home"><span className="logo-mark">Velorra Hub</span></button>
-        <div className="search-wrap">
+        <div className="search-wrap only-desktop-flex">
           <Search size={17} className="search-icon" />
           <input className="search-input" type="text" placeholder="Search products, brands, categories…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search products" />
           {query && <button className="search-clear" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
@@ -347,6 +355,13 @@ function Header({ query, setQuery, onCartClick, onMenuClick, cartCount, onLogoCl
             <ShoppingCart size={20} />
             {cartCount > 0 && <span className="cart-count">{cartCount}</span>}
           </button>
+        </div>
+      </div>
+      <div className="header-search-row only-mobile-flex">
+        <div className="search-wrap">
+          <Search size={17} className="search-icon" />
+          <input className="search-input" type="text" placeholder="Search products, brands, categories…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search products" />
+          {query && <button className="search-clear" onClick={() => setQuery("")} aria-label="Clear search"><X size={15} /></button>}
         </div>
       </div>
     </header>
@@ -456,6 +471,7 @@ const ProductCard = React.memo(function ProductCard({ product, onSelect, onAddTo
           <span className="price">{money(product.price)}</span>
           {product.compareAt && <span className="price-compare">{money(product.compareAt)}</span>}
         </div>
+        {product.freeShipping && <span className="free-shipping-tag">Free shipping</span>}
         <button className="btn btn-add" disabled={outOfStock} onClick={() => onAddToCart(product)}>
           {outOfStock ? "Notify me" : "Add"}
         </button>
@@ -530,6 +546,7 @@ function ProductDetail({ product, onBack, onAddToCart, categories }) {
             {product.compareAt && <span className="price-compare">{money(product.compareAt)}</span>}
             {product.compareAt && <Badge tone="sale">Save {money(product.compareAt - product.price)}</Badge>}
           </div>
+          <p className="shipping-line">{product.freeShipping ? "Free shipping" : product.shippingFee > 0 ? `+ ${money(qty >= 5 ? product.shippingFee * qty : product.shippingFee)} shipping${qty >= 5 ? ` (${qty}× fee)` : ""}` : ""}</p>
           <p className="pdp-desc">{product.description}</p>
 
           {product.colors?.length > 0 && (
@@ -575,6 +592,7 @@ function ProductDetail({ product, onBack, onAddToCart, categories }) {
 
 function CartDrawer({ open, onClose, cart, updateCartQty, removeFromCart, onCheckout, onCheckoutItem }) {
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+  const totalShipping = cart.reduce((s, c) => s + lineShippingFee(c), 0);
   return (
     <div className={`cart-overlay ${open ? "open" : ""}`} onClick={onClose} aria-hidden={!open}>
       <div className="cart-drawer" onClick={(e) => e.stopPropagation()}>
@@ -594,6 +612,7 @@ function CartDrawer({ open, onClose, cart, updateCartQty, removeFromCart, onChec
                     <span className="cart-item-name">{item.name}</span>
                     <span className="cart-item-variant">{[item.color, item.size].filter(Boolean).join(" / ")}</span>
                     <span className="price">{money(item.price * item.qty)}</span>
+                    <span className="shipping-line">{item.freeShipping ? "Free shipping" : lineShippingFee(item) > 0 ? `+ ${money(lineShippingFee(item))} shipping${item.qty >= 5 ? ` (${item.qty}× fee)` : ""}` : ""}</span>
                     <div className="qty-stepper small">
                       <button onClick={() => updateCartQty(item.key, item.qty - 1)} aria-label="Decrease quantity"><Minus size={12} /></button>
                       <span>{item.qty}</span>
@@ -606,7 +625,8 @@ function CartDrawer({ open, onClose, cart, updateCartQty, removeFromCart, onChec
               ))}
             </div>
             <div className="cart-foot">
-              <div className="cart-subtotal"><span>Total ({cart.reduce((s, c) => s + c.qty, 0)} items)</span><span className="price price-lg">{money(subtotal)}</span></div>
+              {totalShipping > 0 && <div className="cart-shipping-row"><span>Shipping</span><span>{money(totalShipping)}</span></div>}
+              <div className="cart-subtotal"><span>Total ({cart.reduce((s, c) => s + c.qty, 0)} items)</span><span className="price price-lg">{money(subtotal + totalShipping)}</span></div>
               <button className="btn btn-primary btn-full" onClick={onCheckout}>Checkout all items</button>
             </div>
           </>
@@ -639,6 +659,8 @@ function Checkout({ cart, paymentAccount, onBack, onOrderPlaced, placeOrder }) {
   const [copiedField, setCopiedField] = useState(null);
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+  const totalShipping = cart.reduce((s, c) => s + lineShippingFee(c), 0);
+  const grandTotal = subtotal + totalShipping;
 
   const requiredOk = form.fullName.trim() && form.address.trim() && form.city.trim() && form.state.trim() && form.country.trim();
   const amountOk = amountPaid !== "" && !isNaN(Number(amountPaid)) && Number(amountPaid) > 0;
@@ -752,7 +774,7 @@ function Checkout({ cart, paymentAccount, onBack, onOrderPlaced, placeOrder }) {
           )}
 
           <label>Amount paid (NGN)
-            <input type="number" min="0" step="0.01" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder={subtotal.toFixed(2)} required />
+            <input type="number" min="0" step="0.01" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder={grandTotal.toFixed(2)} required />
           </label>
 
           <label>Proof of payment <span className="label-hint">(optional — speeds up processing)</span>
@@ -779,7 +801,9 @@ function Checkout({ cart, paymentAccount, onBack, onOrderPlaced, placeOrder }) {
           {cart.map((item) => (
             <div className="summary-line" key={item.key}><span>{item.name} × {item.qty}</span><span>{money(item.price * item.qty)}</span></div>
           ))}
-          <div className="summary-line total"><span>Total to pay</span><span>{money(subtotal)}</span></div>
+          <div className="summary-line"><span>Subtotal</span><span>{money(subtotal)}</span></div>
+          <div className="summary-line"><span>Shipping</span><span>{totalShipping > 0 ? money(totalShipping) : "Free"}</span></div>
+          <div className="summary-line total"><span>Total to pay</span><span>{money(grandTotal)}</span></div>
         </div>
       </form>
     </div>
@@ -802,7 +826,7 @@ function OrderConfirmation({ order, form, onDone }) {
    Footer
    ========================================================================= */
 
-function Footer() {
+function Footer({ paymentAccount }) {
   return (
     <footer className="site-footer">
       <div className="footer-grid">
@@ -811,7 +835,12 @@ function Footer() {
           <p className="footer-tag">Accessories, clothing, electronics, appliances and devices — sourced, shipped, sorted.</p>
         </div>
         <div><h3>Shop</h3><p>Accessories</p><p>Clothing</p><p>Electronics</p><p>Appliances</p><p>Devices</p></div>
-        <div><h3>Support</h3><p>Track an order</p><p>Payment help</p><p>Contact us</p></div>
+        <div>
+          <h3>Support</h3>
+          <p>Track an order</p><p>Payment help</p><p>Contact us</p>
+          {paymentAccount?.contactPhone && <p>Phone: {paymentAccount.contactPhone}</p>}
+          {paymentAccount?.contactWhatsapp && <p>WhatsApp: {paymentAccount.contactWhatsapp}</p>}
+        </div>
         <div><h3>Company</h3><p>About Velorra Hub</p><p>Careers</p><p>Terms</p><p>Privacy</p></div>
       </div>
       <div className="footer-bottom">© {new Date().getFullYear()} Velorra Hub. All rights reserved.</div>
@@ -900,7 +929,7 @@ function StoreApp({ onGoAdmin }) {
         )}
       </main>
 
-      <Footer />
+      <Footer paymentAccount={paymentAccount} />
 
       <CartDrawer
         open={cartOpen} onClose={() => setCartOpen(false)} cart={cart} updateCartQty={updateCartQty} removeFromCart={removeFromCart}
@@ -990,7 +1019,8 @@ function GlobalStyles() {
       .header-row { max-width: 1320px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 14px; }
       .logo { background: none; border: none; padding: 4px 2px; }
       .logo-mark { font-weight: 800; font-size: 22px; letter-spacing: -0.03em; color: var(--ink); }
-      .search-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; background: var(--bg); border: 1.5px solid var(--border); border-radius: 999px; padding: 0 14px; max-width: 640px; transition: border-color 0.15s ease; }
+      .search-wrap { flex: 1; min-width: 0; position: relative; display: flex; align-items: center; background: var(--bg); border: 1.5px solid var(--border); border-radius: 999px; padding: 0 14px; max-width: 900px; transition: border-color 0.15s ease; }
+      .header-search-row { padding: 0 20px 12px; }
       .search-wrap:focus-within { border-color: var(--accent); }
       .search-icon { color: var(--ink-soft); flex-shrink: 0; }
       .search-input { flex: 1; border: none; background: transparent; outline: none; padding: 10px 10px; font-size: 14.5px; color: var(--ink); min-width: 0; }
@@ -1000,7 +1030,8 @@ function GlobalStyles() {
       .cart-btn { position: relative; }
       .cart-count { position: absolute; top: 2px; right: 2px; background: var(--accent); color: var(--accent-ink); font-size: 10.5px; font-weight: 700; border-radius: 999px; min-width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; padding: 0 4px; line-height: 1; }
       .only-mobile { display: none; }
-      @media (max-width: 860px) { .only-mobile { display: inline-flex; } .only-desktop { display: none; } }
+      .only-mobile-flex { display: none; }
+      @media (max-width: 860px) { .only-mobile { display: inline-flex; } .only-desktop { display: none; } .only-desktop-flex { display: none; } .only-mobile-flex { display: flex; } }
 
       .category-nav { background: var(--bg-elevated); border-bottom: 1px solid var(--border); }
       .category-nav-row { max-width: 1320px; margin: 0 auto; padding: 0 20px 12px; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
@@ -1132,19 +1163,24 @@ function GlobalStyles() {
       .cart-remove:hover { color: var(--danger); }
       .cart-foot { padding: 16px 20px 20px; border-top: 1px solid var(--border); }
       .cart-subtotal { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-weight: 600; }
+      .cart-shipping-row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-soft); margin-bottom: 8px; }
+      .shipping-line { font-size: 11.5px; color: var(--ink-soft); font-weight: 600; margin: 2px 0 0; }
+      .shipping-line:empty { display: none; }
+      .free-shipping-tag { display: inline-block; font-size: 10.5px; font-weight: 700; color: var(--ok); margin-top: 2px; }
 
-      .checkout-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; }
+      .checkout-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; min-width: 0; }
       @media (max-width: 860px) { .checkout-grid { grid-template-columns: 1fr; } }
-      .checkout-form { display: flex; flex-direction: column; gap: 14px; max-width: 480px; }
+      .checkout-form { display: flex; flex-direction: column; gap: 14px; max-width: 480px; min-width: 0; }
       .checkout-form h1 { font-size: 24px; margin-bottom: 0; }
       .checkout-subhead { font-size: 15px; margin: 10px 0 -2px; padding-top: 12px; border-top: 1px solid var(--border); }
       .checkout-form label, .checkout-summary label { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--ink-soft); }
       .checkout-form input { padding: 11px 13px; border-radius: var(--radius-sm); border: 1.5px solid var(--border); background: var(--bg-elevated); color: var(--ink); font-size: 14px; }
       .checkout-form input:focus { outline: none; border-color: var(--accent); }
       .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      .checkout-summary { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; height: fit-content; }
+      .checkout-summary { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; height: fit-content; min-width: 0; }
       .checkout-summary h2 { margin-top: 0; font-size: 16px; }
-      .summary-line { display: flex; justify-content: space-between; font-size: 13.5px; padding: 6px 0; color: var(--ink-soft); }
+      .summary-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; padding: 6px 0; color: var(--ink-soft); min-width: 0; }
+      .summary-line span { min-width: 0; overflow-wrap: break-word; }
       .summary-line.total { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 12px; font-weight: 800; font-size: 16px; color: var(--ink); }
       .checkout-success { text-align: center; max-width: 440px; margin: 60px auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
       .success-icon { width: 56px; height: 56px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); display: flex; align-items: center; justify-content: center; }
@@ -1153,11 +1189,12 @@ function GlobalStyles() {
       .order-ref { font-size: 13px; }
       .order-ref code { background: var(--bg-elevated); border: 1px solid var(--border); padding: 3px 8px; border-radius: 6px; }
 
-      .pay-account-card { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-      .pay-account-row { display: flex; align-items: center; justify-content: space-between; }
+      .pay-account-card { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+      .pay-account-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
       .pay-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); font-weight: 700; }
-      .pay-value { display: block; font-size: 15px; font-weight: 700; color: var(--ink); font-family: ui-monospace, "SF Mono", monospace; }
-      .pay-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); margin: 4px 0 0; }
+      .pay-value { display: block; font-size: 15px; font-weight: 700; color: var(--ink); font-family: ui-monospace, "SF Mono", monospace; word-break: break-word; }
+      .pay-note { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--ink-soft); margin: 4px 0 0; min-width: 0; }
+      .pay-note > svg { flex-shrink: 0; margin-top: 2px; }
       .file-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
       .file-drop-label { display: flex; align-items: center; gap: 8px; padding: 12px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--ink-soft); cursor: pointer; font-weight: 600; }
       .file-drop-label:hover { border-color: var(--accent); color: var(--ink); }
