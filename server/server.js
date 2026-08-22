@@ -44,6 +44,8 @@ function rowToProduct(row) {
     featured: !!row.featured,
     rating: row.rating,
     reviews: row.reviews,
+    shippingFee: row.shipping_fee,
+    freeShipping: !!row.free_shipping,
     createdAt: row.created_at,
   };
 }
@@ -295,8 +297,8 @@ app.post("/api/admin/products", requireAdmin, (req, res) => {
   const id = p.id && String(p.id).trim() ? p.id : uuid();
   const now = Date.now();
   db.prepare(`
-    INSERT INTO products (id, name, category_id, price, compare_at, stock, sku, description, colors, sizes, images, tags, featured, rating, reviews, created_at)
-    VALUES (@id, @name, @category_id, @price, @compare_at, @stock, @sku, @description, @colors, @sizes, @images, @tags, @featured, @rating, @reviews, @created_at)
+    INSERT INTO products (id, name, category_id, price, compare_at, stock, sku, description, colors, sizes, images, tags, featured, rating, reviews, shipping_fee, free_shipping, created_at)
+    VALUES (@id, @name, @category_id, @price, @compare_at, @stock, @sku, @description, @colors, @sizes, @images, @tags, @featured, @rating, @reviews, @shipping_fee, @free_shipping, @created_at)
   `).run({
     id,
     name: String(p.name).trim(),
@@ -313,6 +315,8 @@ app.post("/api/admin/products", requireAdmin, (req, res) => {
     featured: p.featured ? 1 : 0,
     rating: Number(p.rating) || 0,
     reviews: Number(p.reviews) || 0,
+    shipping_fee: p.freeShipping ? 0 : (Number(p.shippingFee) || 0),
+    free_shipping: p.freeShipping ? 1 : 0,
     created_at: now,
   });
   const row = db.prepare("SELECT * FROM products WHERE id = ?").get(id);
@@ -327,7 +331,8 @@ app.put("/api/admin/products/:id", requireAdmin, (req, res) => {
     UPDATE products SET
       name = @name, category_id = @category_id, price = @price, compare_at = @compare_at,
       stock = @stock, sku = @sku, description = @description, colors = @colors, sizes = @sizes,
-      images = @images, tags = @tags, featured = @featured, rating = @rating, reviews = @reviews
+      images = @images, tags = @tags, featured = @featured, rating = @rating, reviews = @reviews,
+      shipping_fee = @shipping_fee, free_shipping = @free_shipping
     WHERE id = @id
   `).run({
     id: req.params.id,
@@ -345,6 +350,8 @@ app.put("/api/admin/products/:id", requireAdmin, (req, res) => {
     featured: p.featured !== undefined ? (p.featured ? 1 : 0) : existing.featured,
     rating: p.rating !== undefined ? Number(p.rating) : existing.rating,
     reviews: p.reviews !== undefined ? Number(p.reviews) : existing.reviews,
+    free_shipping: p.freeShipping !== undefined ? (p.freeShipping ? 1 : 0) : existing.free_shipping,
+    shipping_fee: p.freeShipping !== undefined ? (p.freeShipping ? 0 : (Number(p.shippingFee) || 0)) : (p.shippingFee !== undefined ? Number(p.shippingFee) : existing.shipping_fee),
   });
   const row = db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id);
   res.json(rowToProduct(row));
