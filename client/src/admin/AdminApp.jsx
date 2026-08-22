@@ -259,7 +259,7 @@ function AdminHistory({ fulfilledOrders, loading, error, onUnfulfill, reload }) 
    ========================================================================= */
 
 function emptyProduct(categories) {
-  return { id: null, name: "", category: categories[0]?.id || "", price: 0, compareAt: null, stock: 0, sku: "", colors: [], sizes: [], images: [], description: "", featured: false, tags: [], rating: 0, reviews: 0 };
+  return { id: null, name: "", category: categories[0]?.id || "", price: 0, compareAt: null, stock: 0, sku: "", colors: [], sizes: [], images: [], description: "", featured: false, tags: [], rating: 0, reviews: 0, shippingFee: 0, freeShipping: false };
 }
 
 function ProductForm({ product, categories, onSave, onCancel, onDelete }) {
@@ -353,6 +353,10 @@ function ProductForm({ product, categories, onSave, onCancel, onDelete }) {
         <label>Compare-at price <span className="label-hint">(optional)</span><input type="number" min="0" step="0.01" value={form.compareAt ?? ""} onChange={(e) => set("compareAt", e.target.value === "" ? null : e.target.value)} /></label>
         <label>Stock quantity<input type="number" min="0" step="1" value={form.stock} onChange={(e) => set("stock", e.target.value)} required /></label>
         <label className="checkbox-label"><input type="checkbox" checked={form.featured} onChange={(e) => set("featured", e.target.checked)} /> Feature in lookbook strip</label>
+        <label className="checkbox-label"><input type="checkbox" checked={form.freeShipping} onChange={(e) => set("freeShipping", e.target.checked)} /> Free shipping for this product</label>
+        {!form.freeShipping && (
+          <label>Shipping fee <span className="label-hint">(added at checkout)</span><input type="number" min="0" step="0.01" value={form.shippingFee} onChange={(e) => set("shippingFee", e.target.value)} /></label>
+        )}
         <label className="span-2">Description<textarea rows={4} value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Describe the product…" /></label>
 
         <div className="span-2 tag-toggle-row">
